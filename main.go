@@ -20,8 +20,10 @@ var (
 )
 
 type sem struct {
-	cap uint
-	ch  chan struct{}
+	cap       uint
+	ch        chan struct{}
+	blockTime []time.Duration
+	mu        sync.Mutex
 }
 
 func newSem(cap uint) *sem {
@@ -35,11 +37,30 @@ func newSem(cap uint) *sem {
 	}
 }
 func (s *sem) acquire() {
+	now := time.Now()
+	defer func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.blockTime = append(s.blockTime, time.Since(now))
+	}()
 	<-s.ch
 }
 
 func (s *sem) release() {
 	s.ch <- struct{}{}
+}
+
+func (s *sem) avgBlockTime() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.blockTime) == 0 {
+		return 0
+	}
+	var sum time.Duration
+	for _, t := range s.blockTime {
+		sum += t
+	}
+	return sum / time.Duration(len(s.blockTime))
 }
 
 func main() {
@@ -55,8 +76,8 @@ func main() {
 			wg.Add(1)
 			sem.acquire()
 			go func(port int) {
-				defer wg.Done()
 				defer func() {
+					wg.Done()
 					sem.release()
 				}()
 				conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", *addr, port))
@@ -80,6 +101,7 @@ func main() {
 	}
 	stop()
 	fmt.Printf("time elapsed: %dms\n", time.Since(now).Milliseconds())
+	fmt.Printf("block time: %dns\n", sem.avgBlockTime().Nanoseconds())
 }
 
 func parsePortRange(s string) (int, int) {
