@@ -84,7 +84,12 @@ func main() {
 				if err != nil {
 					return
 				}
-				defer conn.Close()
+				defer func(conn net.Conn) {
+					err := conn.Close()
+					if err != nil {
+						fmt.Println("cannot close connection:", err)
+					}
+				}(conn)
 				fmt.Printf("DIAL %d ✅\n", port)
 			}(i)
 		}
